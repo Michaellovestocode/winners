@@ -1,0 +1,13 @@
+bot_secrets.py
+bot_state_combined.json
+bot_state.json
+live_bot_combined.log
+live_bot.log
+live_bot_reversal.log
+results/*.csv
+reversal_strategy/results/*.csv
+__pycache__/
+*.pyc
+venv/
+.venv/# Ignore local secrets
+bot_secrets.py
