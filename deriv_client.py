@@ -79,17 +79,29 @@ def fetch_candles(symbol: str, granularity_seconds: int, count: int) -> list:
 
 def fetch_current_price(symbol: str) -> float:
     """
-    Returns the latest tick price for a symbol (single snapshot, not an
-    ongoing subscription).
+    Returns the latest tick price for a symbol.
 
-    FIX: Deriv's API now requires an explicit "subscribe" field in ticks
-    requests - a bare {"ticks": symbol} with no subscribe field was being
-    rejected (manifesting as a confusing "Symbol invalid" error, even
-    though the symbol itself was fine). Per current Deriv docs: use
-    "subscribe": 0 for a one-time snapshot without ongoing updates.
+    FIX (2nd attempt): the plain {"ticks": symbol} endpoint proved unreliable
+    with this app_id - both omitting "subscribe" and setting "subscribe": 0
+    were rejected by Deriv's validation. Sidestepping this entirely by reusing
+    the SAME "ticks_history" request type that already works reliably for
+    fetch_candles() (proven throughout all backtesting), just asking for a
+    single most-recent tick instead of a full candle history.
     """
-    payload = {"ticks": symbol, "subscribe": 0}
+    payload = {
+        "ticks_history": symbol,
+        "adjust_start_time": 1,
+        "count": 1,
+        "end": "latest",
+        "start": 1,
+        "style": "ticks",
+    }
     resp = _request(payload, timeout=10)
     if "error" in resp:
         raise RuntimeError(f"Deriv API error for {symbol}: {resp['error'].get('message', resp['error'])}")
-    return resp["tick"]["quote"]
+
+    history = resp.get("history", {})
+    prices = history.get("prices", [])
+    if not prices:
+        raise RuntimeError(f"Deriv API returned no price data for {symbol}: {resp}")
+    return prices[-1]
