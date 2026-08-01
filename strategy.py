@@ -32,9 +32,8 @@ def suggest_leverage(atr_pct: float) -> int:
     if atr_pct >= cfg.MAX_ATR_PCT:
         return cfg.MIN_LEVERAGE
 
-    # linear interpolation between min and max ATR% bounds
     span = cfg.MAX_ATR_PCT - cfg.MIN_ATR_PCT
-    pos = (atr_pct - cfg.MIN_ATR_PCT) / span  # 0 -> low vol, 1 -> high vol
+    pos = (atr_pct - cfg.MIN_ATR_PCT) / span
     leverage = cfg.MAX_LEVERAGE - pos * (cfg.MAX_LEVERAGE - cfg.MIN_LEVERAGE)
     return max(cfg.MIN_LEVERAGE, min(cfg.MAX_LEVERAGE, round(leverage)))
 
@@ -43,24 +42,20 @@ def evaluate_bar(df, i: int, symbol: str) -> Optional[Signal]:
     """
     Evaluate a single bar (index i) for a signal.
     df must already have indicators from indicators.add_all_indicators().
-    Requires enough history behind i (checked by caller).
     """
     row = df.iloc[i]
     prev = df.iloc[i - 1]
 
     atr_pct = row["atr_pct"]
 
-    # --- Volatility gate: skip dead markets or unstable spikes ---
     if atr_pct < cfg.MIN_ATR_PCT or atr_pct > cfg.MAX_ATR_PCT:
         return None
 
-    # --- Regime / trend filter (with strength check, not just any crossover) ---
     ema_gap_pct = abs(row["ema_fast"] - row["ema_slow"]) / row["close"] * 100
     trend_is_strong = ema_gap_pct >= cfg.TREND_STRENGTH_MIN_PCT
     uptrend = row["ema_fast"] > row["ema_slow"] and trend_is_strong
     downtrend = row["ema_fast"] < row["ema_slow"] and trend_is_strong
 
-    # --- MACD crossover detection (momentum trigger) ---
     macd_cross_up = prev["macd"] <= prev["macd_signal"] and row["macd"] > row["macd_signal"]
     macd_cross_down = prev["macd"] >= prev["macd_signal"] and row["macd"] < row["macd_signal"]
 
@@ -68,22 +63,19 @@ def evaluate_bar(df, i: int, symbol: str) -> Optional[Signal]:
     side = None
     confidence = 0.0
 
-    # --- LONG setup: uptrend + bullish MACD cross + RSI not overbought ---
     if uptrend and macd_cross_up and cfg.RSI_MIDLINE < row["rsi"] < cfg.RSI_OVERBOUGHT:
         side = "LONG"
         reasons.append(f"Strong uptrend (EMA gap {ema_gap_pct:.2f}%)")
         reasons.append("Bullish MACD crossover")
         reasons.append(f"RSI {row['rsi']:.1f} (not overbought)")
-        confidence += 40  # trend
-        confidence += 30  # macd cross
-        # extra confidence if RSI has room to run (not near overbought)
+        confidence += 40
+        confidence += 30
         rsi_room = max(0, (cfg.RSI_OVERBOUGHT - row["rsi"]) / cfg.RSI_OVERBOUGHT)
         confidence += 20 * rsi_room
         if row["macd_hist"] > prev["macd_hist"]:
             confidence += 10
             reasons.append("MACD histogram expanding")
 
-    # --- SHORT setup: downtrend + bearish MACD cross + RSI not oversold ---
     elif downtrend and macd_cross_down and cfg.RSI_OVERSOLD < row["rsi"] < cfg.RSI_MIDLINE:
         side = "SHORT"
         reasons.append(f"Strong downtrend (EMA gap {ema_gap_pct:.2f}%)")
@@ -118,6 +110,19 @@ def evaluate_bar(df, i: int, symbol: str) -> Optional[Signal]:
     rr = round(reward / risk, 2) if risk > 0 else 0
 
     reasons.append(f"ATR {atr_pct:.2f}% of price (volatility gate passed)")
+
+    # TEST MODE: reverse direction, force 1:1 R:R
+    risk = abs(entry - sl)
+    if side == "LONG":
+        side = "SHORT"
+        sl = entry + risk
+        tp = entry - risk
+    else:
+        side = "LONG"
+        sl = entry - risk
+        tp = entry + risk
+    rr = 1.0
+    reasons.append("⚠️ TEST MODE: signal reversed, forced 1:1 R:R")
 
     return Signal(
         symbol=symbol,
