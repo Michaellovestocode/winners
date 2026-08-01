@@ -191,6 +191,19 @@ def evaluate_bar(df, i: int, symbol: str) -> Optional[Signal]:
     leverage = suggest_leverage(atr_pct)
     reasons.append(f"ATR {atr_pct:.3f}% of price (volatility gate passed)")
 
+    # TEST MODE: reverse direction, force 1:1 R:R
+    risk = abs(entry - stop)
+    if side == "LONG":
+        side = "SHORT"
+        stop = entry + risk
+        target = entry - risk
+    else:
+        side = "LONG"
+        stop = entry - risk
+        target = entry + risk
+    rr = 1.0
+    reasons.append("⚠️ TEST MODE: signal reversed, forced 1:1 R:R")
+
     return Signal(
         symbol=symbol, side=side, entry=entry, stop_loss=stop, take_profit=target,
         confidence=confidence, leverage=leverage, rr_ratio=rr, reasons=reasons, bar_index=i
